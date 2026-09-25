@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	Version        = "0.1.12"
+	Version        = "0.1.12-sizhe.1"
 	Provider       = "oai-basispoints"
 	AuthProviderID = "codex"
 	PluginID       = Provider
@@ -118,6 +118,7 @@ type Config struct {
 	TimeoutSeconds   int               `yaml:"timeout_seconds" json:"timeout_seconds"`
 	MaxResponseBytes int               `yaml:"max_response_bytes" json:"max_response_bytes"`
 	AuthMode         string            `yaml:"auth_mode" json:"auth_mode"`
+	IncludeAuthIDs   []string          `yaml:"include_auth_ids" json:"include_auth_ids"`
 	ToolsVersionID   string            `yaml:"tools_version_id" json:"tools_version_id"`
 }
 
@@ -152,6 +153,22 @@ func (c *Config) normalize() error {
 	c.AuthMode = strings.TrimSpace(c.AuthMode)
 	if c.AuthMode == "" {
 		c.AuthMode = "chatgpt"
+	}
+	if c.IncludeAuthIDs != nil {
+		seenAuthIDs := make(map[string]struct{}, len(c.IncludeAuthIDs))
+		includeAuthIDs := make([]string, 0, len(c.IncludeAuthIDs))
+		for _, authID := range c.IncludeAuthIDs {
+			authID = strings.TrimSpace(authID)
+			if authID == "" {
+				return fail(400, "invalid_config", "include_auth_ids cannot contain an empty source AuthID")
+			}
+			if _, exists := seenAuthIDs[authID]; exists {
+				continue
+			}
+			seenAuthIDs[authID] = struct{}{}
+			includeAuthIDs = append(includeAuthIDs, authID)
+		}
+		c.IncludeAuthIDs = includeAuthIDs
 	}
 	if c.TimeoutSeconds < 10 || c.TimeoutSeconds > 1800 {
 		return fail(400, "invalid_config", "timeout_seconds must be between 10 and 1800")
@@ -197,7 +214,19 @@ func (c *Config) normalize() error {
 func (c Config) clone() Config {
 	c.Models = append([]string(nil), c.Models...)
 	c.ModelMappings = maps.Clone(c.ModelMappings)
+	c.IncludeAuthIDs = append([]string(nil), c.IncludeAuthIDs...)
 	return c
+}
+
+// includesSourceAuthID requires an exact source CPA AuthID match. An empty
+// allowlist deliberately creates no Basis Points virtual credentials.
+func (c Config) includesSourceAuthID(authID string) bool {
+	for _, includedAuthID := range c.IncludeAuthIDs {
+		if authID == includedAuthID {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeEffort(value any) string {

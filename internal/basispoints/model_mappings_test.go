@@ -165,6 +165,7 @@ func TestModelMappingsRequestSelection(t *testing.T) {
 func TestModelMappingsPersistAndClone(t *testing.T) {
 	cfg := mappedConfig(3)
 	cfg.DataDir = t.TempDir()
+	cfg.IncludeAuthIDs = []string{"codex-pro.json"}
 	svc := NewService()
 	configureForTest(t, svc, cfg)
 	raw, err := os.ReadFile(filepath.Join(cfg.DataDir, "settings.json"))
@@ -185,6 +186,7 @@ func TestModelMappingsPersistAndClone(t *testing.T) {
 	snapshot := svc.config()
 	snapshot.ModelMappings[cfg.Models[0]] = "modified"
 	snapshot.Models[0] = "modified-alias"
+	snapshot.IncludeAuthIDs[0] = "modified-auth-id"
 	if !reflect.DeepEqual(svc.config(), cfg) {
 		t.Fatal("configuration snapshots share mutable mapping data")
 	}

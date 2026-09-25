@@ -290,7 +290,7 @@ func codexPlanType(raw []byte, accessToken string) string {
 	return ""
 }
 
-func authParse(raw []byte) (map[string]any, error) {
+func authParse(raw []byte, cfg Config) (map[string]any, error) {
 	var request authParseRequest
 	if err := json.Unmarshal(raw, &request); err != nil {
 		return nil, err
@@ -310,20 +310,25 @@ func authParse(raw []byte) (map[string]any, error) {
 		}
 		return map[string]any{"Handled": false}, nil
 	}
-	virtual := authData(request.RawJSON, fileName, c)
+	included := cfg.includesSourceAuthID(fileName)
 	if provider == Provider {
+		if !included {
+			return map[string]any{"Handled": false}, nil
+		}
+		virtual := authData(request.RawJSON, fileName, c)
 		return map[string]any{"Handled": true, "Auth": virtual}, nil
 	}
 	native, err := nativeCodexAuthData(request.RawJSON, fileName, c)
 	if err != nil {
 		return nil, err
 	}
+	auths := []any{native}
+	if included {
+		auths = append(auths, authData(request.RawJSON, fileName, c))
+	}
 	return map[string]any{
 		"Handled": true,
-		"Auths": []any{
-			native,
-			virtual,
-		},
+		"Auths":   auths,
 	}, nil
 }
 

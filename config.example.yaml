@@ -9,6 +9,12 @@ plugins:
       # 启用本插件。插件 ID 固定为 oai-basispoints，请勿随意改名。
       enabled: true
 
+      # 只允许这些「源 CPA AuthID」创建 oai-basispoints 虚拟凭证。
+      # AuthID 是 CPA 中显示的 OAuth 文件名；请填写原始文件名，不要填写 bp- 前缀的虚拟 ID。
+      # 未配置或留空时不会创建任何 Basis Points 虚拟凭证，原生 Codex 调度不受影响。
+      include_auth_ids:
+        - codex-paid-pro.json
+
       # Basis Points Responses 接口地址，通常无需修改。
       responses_url: https://bps.openai.com/basispoints/api/responses
 

@@ -15,7 +15,7 @@ func TestAuthParsePreservesNativeCodexCredentials(t *testing.T) {
 	root["id_token"] = "e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOiB7ImNoYXRncHRfcGxhbl90eXBlIjogInBybyJ9fQ."
 	root["note"] = "keep note"
 	raw := jsonBytes(root)
-	response, err := authParse(jsonBytes(authParseRequest{Provider: AuthProviderID, FileName: "native.json", RawJSON: raw}))
+	response, err := authParse(jsonBytes(authParseRequest{Provider: AuthProviderID, FileName: "native.json", RawJSON: raw}), Config{IncludeAuthIDs: []string{"native.json"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,6 +32,31 @@ func TestAuthParsePreservesNativeCodexCredentials(t *testing.T) {
 	}
 	if !reflect.DeepEqual(native["StorageJSON"], raw) {
 		t.Fatal("source credential storage changed")
+	}
+}
+
+func TestConfigEmptyAuthAllowlistDoesNotSelectAnyCredential(t *testing.T) {
+	cfg := defaultConfig()
+	if cfg.includesSourceAuthID("codex-pro.json") {
+		t.Fatal("empty include_auth_ids must not select a source credential")
+	}
+	if err := cfg.normalize(); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.IncludeAuthIDs) != 0 {
+		t.Fatalf("IncludeAuthIDs = %#v, want empty", cfg.IncludeAuthIDs)
+	}
+}
+
+func TestConfigNormalizesAuthAllowlist(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.IncludeAuthIDs = []string{"  codex-pro.json  ", "codex-pro.json", "codex-plus.json"}
+	if err := cfg.normalize(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"codex-pro.json", "codex-plus.json"}
+	if !reflect.DeepEqual(cfg.IncludeAuthIDs, want) {
+		t.Fatalf("IncludeAuthIDs = %#v, want %#v", cfg.IncludeAuthIDs, want)
 	}
 }
 
@@ -90,7 +115,7 @@ func TestPrepareRequestPreservesRemoteImagesAndReasoningEffort(t *testing.T) {
 
 func TestAuthParseRejectsMalformedNativeStorage(t *testing.T) {
 	raw := []byte(`{"type":"codex","access_token":"test","account_id":"test"} trailing`)
-	_, err := authParse(jsonBytes(authParseRequest{Provider: AuthProviderID, FileName: "invalid.json", RawJSON: raw}))
+	_, err := authParse(jsonBytes(authParseRequest{Provider: AuthProviderID, FileName: "invalid.json", RawJSON: raw}), defaultConfig())
 	if err == nil {
 		t.Fatal("malformed native credential was accepted")
 	}

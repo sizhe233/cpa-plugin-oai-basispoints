@@ -1,5 +1,11 @@
 # 更新日志
 
+## v0.1.12-sizhe.1 — 2026-09-25（UTC+8）
+
+- Fork 版本新增 `include_auth_ids` 源 CPA AuthID 白名单。只为精确匹配的 OAuth 文件生成 `oai-basispoints` 虚拟认证；未命中的文件继续保留原生 `codex` 认证，不改变现有原生模型调度。
+- 空白名单按拒绝策略处理：插件不创建任何 Basis Points 虚拟凭证，避免新安装或配置遗漏时把 Free 等非目标凭证纳入 Basis Points 调度。
+- 更新插件目录、配置示例和测试；本 Fork 基线为上游 `v0.1.12`。
+
 ## v0.1.12 — 2026-09-25（UTC+8）
 
 - 仅修改插件：声明 CPA 已有的 `codex` 输入/输出格式，复用宿主 Claude↔Codex 转换；不新增私有转换器，不修改 CPA 主程序。

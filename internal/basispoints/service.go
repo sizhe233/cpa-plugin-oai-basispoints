@@ -95,7 +95,7 @@ func (s *Service) Handle(method string, raw json.RawMessage) (any, error) {
 	case "executor.identifier":
 		return map[string]any{"identifier": Provider}, nil
 	case "auth.parse":
-		return authParse(raw)
+		return authParse(raw, s.config())
 	case "auth.login.start":
 		return nil, fail(400, "login_unavailable", "Import an existing CPA codex OAuth credential; interactive login is not used")
 	case "auth.login.poll":
@@ -255,8 +255,8 @@ func registration(cfg Config) map[string]any {
 		"metadata": map[string]any{
 			"Name":             "OpenAI Basis Points",
 			"Version":          Version,
-			"Author":           "jaxson-wang",
-			"GitHubRepository": "https://github.com/JaxsonWang/cpa-plugin-oai-basispoints",
+			"Author":           "sizhe233 (fork of jaxson-wang)",
+			"GitHubRepository": "https://github.com/sizhe233/cpa-plugin-oai-basispoints",
 			"Description":      "CPA Responses adapter for bps.openai.com with safe client-tool relay",
 			"ConfigFields": []map[string]any{
 				{"Name": "responses_url", "Type": "string", "Description": "Basis Points Responses endpoint."},
@@ -266,6 +266,7 @@ func registration(cfg Config) map[string]any {
 				{"Name": "timeout_seconds", "Type": "integer", "Description": "Upstream request timeout."},
 				{"Name": "max_response_bytes", "Type": "integer", "Description": "Maximum upstream response size."},
 				{"Name": "auth_mode", "Type": "string", "Description": "Basis Points authentication mode; normally chatgpt."},
+				{"Name": "include_auth_ids", "Type": "array", "Description": "Exact source CPA Codex AuthIDs allowed to create Basis Points virtual credentials. Empty means none."},
 				{"Name": "tools_version_id", "Type": "string", "Description": "Optional authoritative Basis Points tools catalog version."},
 			},
 		},

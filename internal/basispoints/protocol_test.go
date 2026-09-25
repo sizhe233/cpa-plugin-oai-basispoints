@@ -185,7 +185,7 @@ func TestAuthParseExpandsCodexFileIntoNativeAndBasisPointsAuths(t *testing.T) {
 		"account_id":   "file-account-id",
 	})
 	request, _ := json.Marshal(authParseRequest{Provider: AuthProviderID, FileName: "codex-account.json", RawJSON: raw})
-	response, err := authParse(request)
+	response, err := authParse(request, Config{IncludeAuthIDs: []string{"codex-account.json"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,6 +211,30 @@ func TestAuthParseExpandsCodexFileIntoNativeAndBasisPointsAuths(t *testing.T) {
 	metadata := objectValue(virtual["Metadata"])
 	if metadata["account_id"] != "acct-auth-parse" {
 		t.Fatalf("virtual metadata = %#v, want JWT account ID", metadata)
+	}
+}
+
+func TestAuthParseLeavesExcludedSourceAsNativeCodexOnly(t *testing.T) {
+	encode := func(value any) string {
+		raw, _ := json.Marshal(value)
+		return base64.RawURLEncoding.EncodeToString(raw)
+	}
+	token := encode(map[string]any{"alg": "none"}) + "." + encode(map[string]any{
+		"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct-excluded"},
+	}) + "."
+	raw := jsonBytes(map[string]any{"type": "codex", "access_token": token, "account_id": "file-account-id"})
+	request, _ := json.Marshal(authParseRequest{Provider: AuthProviderID, FileName: "codex-free.json", RawJSON: raw})
+	response, err := authParse(request, Config{IncludeAuthIDs: []string{"codex-pro.json"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auths, ok := response["Auths"].([]any)
+	if !ok || len(auths) != 1 {
+		t.Fatalf("Auths = %#v, want only native Codex record", response["Auths"])
+	}
+	native := objectValue(auths[0])
+	if native["Provider"] != AuthProviderID || native["ID"] != "codex-free.json" {
+		t.Fatalf("native auth = %#v", native)
 	}
 }
 
