@@ -9,9 +9,10 @@ plugins:
       # 启用本插件。插件 ID 固定为 oai-basispoints，请勿随意改名。
       enabled: true
 
-      # 只允许这些「源 CPA AuthID」创建 oai-basispoints 虚拟凭证。
-      # AuthID 是 CPA 中显示的 OAuth 文件名；请填写原始文件名，不要填写 bp- 前缀的虚拟 ID。
-      # 未配置或留空时不会创建任何 Basis Points 虚拟凭证，原生 Codex 调度不受影响。
+      # Basis Points 仅可读取这些「源 CPA AuthID」。
+      # AuthID 是 CPA 中显示的原始 OAuth 文件名。插件会为每个列出的源文件
+      # 创建一个无令牌的 oai-basispoints-ref-*.json 引用认证，不会接管或复制原 OAuth 文件。
+      # 未配置或留空时，不创建引用认证，Basis Points 请求没有可用账号；原生 Codex 调度不受影响。
       include_auth_ids:
         - codex-paid-pro.json
 

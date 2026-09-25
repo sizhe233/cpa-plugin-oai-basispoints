@@ -25,13 +25,16 @@ plugins:
 
 ## 安装和配置
 
-1. 将 Linux amd64 动态库复制到 CPA 的插件目录，并使用 `oai-basispoints-v<version>.so` 作为文件名，例如 `oai-basispoints-v0.1.12-sizhe.1.so`。CPA 由文件名解析插件 ID；不要在 `-v` 前加入 Fork 名称，否则它不会匹配 `plugins.configs.oai-basispoints`。
+1. 将 Linux amd64 动态库复制到 CPA 的插件目录，并使用 `oai-basispoints-v<version>.so` 作为文件名，例如 `oai-basispoints-v0.1.12-sizhe.3.so`。CPA 由文件名解析插件 ID；不要在 `-v` 前加入 Fork 名称，否则它不会匹配 `plugins.configs.oai-basispoints`。
 2. 将 `config.example.yaml` 按需合并到 CPA 的 `config.yaml`；它是完整的宿主配置示例，不会由插件自动读取。插件内置默认暴露 `gpt-6-astra-basispoints`，示例同时配置 Astra 和 Sol，可继续增删模型。
-3. 在 `plugins.configs.oai-basispoints.include_auth_ids` 中列出允许的源 CPA AuthID。AuthID 就是 CPA 中显示的 OAuth 文件名，例如 `codex-paid-pro.json`；不要填写 `bp-` 前缀的虚拟 ID。未配置或为空时，本 Fork 不创建任何 Basis Points 虚拟凭证，原生 Codex 记录和调度不受影响。
-4. CPA 的 `auth-dir` 中已有的 `type: codex` OAuth 文件会被插件识别；插件只在内存中读取 token，不生成另一份 token 文件。
-5. 客户端使用 Responses 协议调用 `gpt-6-astra-basispoints`。模型目录声明图像输入，以及 `low`、`medium`、`high`、`xhigh`、`max`、`ultra` 思考等级；`max` 映射为 `xhigh`，`ultra` 原样传递，未指定时默认 `medium`。
+3. 在 `plugins.configs.oai-basispoints.include_auth_ids` 中列出允许的源 CPA AuthID。AuthID 就是 CPA 中显示的 OAuth 文件名，例如 `codex-paid-pro.json`。未配置或为空时，Basis Points 请求会直接返回“无可用源凭证”；不会把 Free 等未列入账号纳入路由。
+4. 插件为每个白名单源文件创建一个确定命名的 `oai-basispoints-ref-*.json` 引用认证。它只保存 `type`、`auth_kind`、`source_auth_id` 和说明，不保存、复制或同步 OAuth token。每个引用文件只解析为一个插件认证，因此不是 CPA virtual auth。
+5. `type: codex` 源 OAuth 文件始终由 CPA 官方 Codex 解析器管理。可继续在 Management Center 修改 `excluded_models`、权重、禁用状态等字段；这些修改写回原始 OAuth 文件，重启后仍由 CPA 官方解析器加载。
+6. 客户端使用 Responses 协议调用 `gpt-6-astra-basispoints`。模型目录声明图像输入，以及 `low`、`medium`、`high`、`xhigh`、`max`、`ultra` 思考等级；`max` 映射为 `xhigh`，`ultra` 原样传递，未指定时默认 `medium`。
 
-插件的 `auth.parse` 会接管 CPA 中 `type: codex` 的 OAuth 文件，并始终保留原生 `codex` 内存认证。只有源 AuthID 精确命中 `include_auth_ids` 时，才额外生成 `oai-basispoints` 虚拟认证。这样现有 Codex 模型继续使用 CPA 原生执行器，白名单中的 `gpt-6-astra-basispoints` 请求才使用本插件；不会生成或改写 OAuth 文件。原生 Codex 记录保留源 OAuth 元数据，供原生执行器读取访问令牌和刷新令牌。注意：当前 CPA 会把这两条记录都标记为虚拟认证，不持久化原生记录的刷新结果；Basis Points 记录也不会自动同步原生记录在内存中刷新的 JWT。源 JWT 过期时，需要先通过 CPA 更新或重新导入源 OAuth 凭据，再重新加载，单纯重载过期文件无效。流式响应遵循 Responses SSE 格式，但为保证工具调用可在完整 item 上做安全转换，当前会先读完上游 SSE 再回放给客户端，不是 token 级实时转发。
+插件只向这些引用认证注册 `models` 中显式配置的 Basis Points 别名，例如 `gpt-6-astra-basispoints`；所有原生 Codex 模型仍由 CPA 的常规调度和执行器处理。CPA 先在 Basis Points 引用认证之间调度，再由插件通过官方 `host.auth.list` 和 `host.auth.get` 回调读取该引用关联的当前源 OAuth 文件。每次请求读取物理源文件的当前 OAuth 数据，因此在管理页更新凭证后无需同步另一份插件认证。
+
+Basis Points 用量会记在对应的引用 AuthID 上，而不是原始 Codex AuthID；引用与源文件是一对一关系，标签和 `note` 中保留源 AuthID，便于 KEEPER 按来源查看。Basis Points 429 只会冷却该引用认证，不会让 CPA 再回退到同一源文件的原生 Codex 调度。此版本不修改 CPA 源码或 CPA 镜像。流式响应遵循 Responses SSE 格式，但为保证工具调用可在完整 item 上做安全转换，当前会先读完上游 SSE 再回放给客户端，不是 token 级实时转发。
 
 ## 构建
 

@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
+
+const referenceSourceAuthIDKey = "source_auth_id"
 
 type authParseRequest struct {
 	Provider string `json:"Provider"`
@@ -29,6 +30,101 @@ type credential struct {
 	AuthMode    string
 	Email       string
 	ExpiresAt   time.Time
+}
+
+// authParse owns only plugin-created reference files. It never claims a
+// type: codex file, so CPA retains normal ownership of the OAuth source file.
+func authParse(raw []byte, cfg Config) (map[string]any, error) {
+	var request authParseRequest
+	if err := json.Unmarshal(raw, &request); err != nil {
+		return nil, fail(400, "invalid_auth", "Basis Points auth parse request is invalid")
+	}
+	provider := strings.ToLower(strings.TrimSpace(request.Provider))
+	if provider != "" && provider != Provider {
+		return map[string]any{"Handled": false}, nil
+	}
+
+	sourceAuthID, matched, err := referenceSourceAuthID(request.RawJSON)
+	if err != nil {
+		return nil, err
+	}
+	if !matched {
+		return map[string]any{"Handled": false}, nil
+	}
+	fileName := strings.TrimSpace(request.FileName)
+	if fileName == "" {
+		fileName = filepath.Base(strings.TrimSpace(request.Path))
+	}
+	if fileName == "" {
+		fileName = sourceReferenceFileName(sourceAuthID)
+	}
+	return map[string]any{
+		"Handled": true,
+		"Auth":    referenceAuthData(request.RawJSON, fileName, sourceAuthID, referenceDisabled(request.RawJSON, cfg, sourceAuthID) || !isManagedReferenceFile(fileName, sourceAuthID)),
+	}, nil
+}
+
+// authRefresh deliberately does not refresh the source OAuth token. CPA's
+// built-in Codex provider owns that lifecycle; this only preserves the small
+// non-secret reference record.
+func authRefresh(raw []byte, cfg Config) (map[string]any, error) {
+	var request authRefreshRequest
+	if err := json.Unmarshal(raw, &request); err != nil {
+		return nil, fail(400, "invalid_auth", "Basis Points auth refresh request is invalid")
+	}
+	sourceAuthID, matched, err := referenceSourceAuthID(request.StorageJSON)
+	if err != nil {
+		return nil, err
+	}
+	if !matched {
+		return nil, fail(400, "invalid_reference_auth", "Basis Points auth refresh requires a source_auth_id reference")
+	}
+	fileName := filepath.Base(strings.TrimSpace(request.AuthID))
+	if fileName == "" {
+		fileName = sourceReferenceFileName(sourceAuthID)
+	}
+	next := time.Now().Add(24 * time.Hour).UTC()
+	return map[string]any{
+		"Auth":             referenceAuthData(request.StorageJSON, fileName, sourceAuthID, referenceDisabled(request.StorageJSON, cfg, sourceAuthID)),
+		"NextRefreshAfter": next,
+	}, nil
+}
+
+func referenceAuthData(raw []byte, fileName, sourceAuthID string, disabled bool) map[string]any {
+	metadata := referenceMetadata(raw)
+	metadata["type"] = Provider
+	metadata["auth_kind"] = "oauth"
+	metadata[referenceSourceAuthIDKey] = sourceAuthID
+	if strings.TrimSpace(stringValue(metadata["note"])) == "" {
+		metadata["note"] = "Basis Points source: " + sourceAuthID
+	}
+	fileName = filepath.Base(strings.TrimSpace(fileName))
+	if fileName == "" {
+		fileName = sourceReferenceFileName(sourceAuthID)
+	}
+	return map[string]any{
+		"Provider":         Provider,
+		"ID":               fileName,
+		"FileName":         fileName,
+		"Label":            "Basis Points: " + sourceAuthID,
+		"Disabled":         disabled,
+		"StorageJSON":      jsonBytes(metadata),
+		"Metadata":         metadata,
+		"Attributes":       map[string]string{"auth_kind": "oauth", referenceSourceAuthIDKey: sourceAuthID},
+		"NextRefreshAfter": time.Now().Add(24 * time.Hour).UTC(),
+	}
+}
+
+func referenceMetadata(raw []byte) map[string]any {
+	metadata := make(map[string]any)
+	_ = json.Unmarshal(raw, &metadata)
+	return metadata
+}
+
+func referenceDisabled(raw []byte, cfg Config, sourceAuthID string) bool {
+	metadata := referenceMetadata(raw)
+	disabled, _ := metadata["disabled"].(bool)
+	return disabled || !cfg.includesSourceAuthID(sourceAuthID)
 }
 
 func parseCredential(raw []byte) (credential, error) {
@@ -174,194 +270,6 @@ func timeFromValue(value any) time.Time {
 		}
 	}
 	return time.Time{}
-}
-
-func credentialID(fileName string) string {
-	base := strings.TrimSpace(filepath.Base(fileName))
-	base = strings.TrimSuffix(base, filepath.Ext(base))
-	if base == "" {
-		base = "chatgpt"
-	}
-	var builder strings.Builder
-	builder.WriteString("bp-")
-	for _, character := range base {
-		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '-' || character == '_' || character == '.' {
-			builder.WriteRune(character)
-		} else {
-			builder.WriteByte('-')
-		}
-	}
-	return builder.String()
-}
-
-func authData(raw []byte, fileName string, c credential) map[string]any {
-	id := credentialID(fileName)
-	label := c.Email
-	if label == "" {
-		label = fileName
-	}
-	return map[string]any{
-		"Provider":    Provider,
-		"ID":          id,
-		"FileName":    fileName,
-		"Label":       label,
-		"StorageJSON": raw,
-		"Metadata": map[string]any{
-			"type":       Provider,
-			"auth_kind":  "oauth",
-			"account_id": c.AccountID,
-			"auth_mode":  c.AuthMode,
-		},
-		"Attributes": map[string]string{
-			"auth_kind":  "oauth",
-			"account_id": c.AccountID,
-			"auth_mode":  c.AuthMode,
-		},
-	}
-}
-
-func nativeCodexAuthData(raw []byte, fileName string, c credential) (map[string]any, error) {
-	// 在 Basis Points 虚拟记录旁保留原生 Codex 记录，使既有 Codex 模型
-	// 继续走 CPA 原生执行器，同时为 oai-basispoints 模型提供独立认证。
-	label := c.Email
-	if label == "" {
-		label = fileName
-	}
-	planType := codexPlanType(raw, c.AccessToken)
-	// CPA 原生执行器直接读取 Metadata，必须保留源凭据字段。
-	var metadata map[string]any
-	if err := json.Unmarshal(raw, &metadata); err != nil {
-		return nil, fail(400, "invalid_auth", "OAuth credential is not valid JSON")
-	}
-	metadata["type"] = AuthProviderID
-	metadata["auth_kind"] = "oauth"
-	metadata["access_token"] = c.AccessToken
-	if firstString(metadata, "account_id") == "" {
-		metadata["account_id"] = c.AccountID
-	}
-	attributes := map[string]string{
-		"auth_kind":  "oauth",
-		"account_id": c.AccountID,
-		"auth_mode":  c.AuthMode,
-	}
-	if planType != "" {
-		metadata["plan_type"] = planType
-		attributes["plan_type"] = planType
-	}
-	if priority, ok := metadata["priority"].(float64); ok {
-		attributes["priority"] = strconv.Itoa(int(priority))
-	} else if priority := strings.TrimSpace(stringValue(metadata["priority"])); priority != "" {
-		if _, err := strconv.Atoi(priority); err == nil {
-			attributes["priority"] = priority
-		}
-	}
-	if note := strings.TrimSpace(stringValue(metadata["note"])); note != "" {
-		attributes["note"] = note
-	}
-	return map[string]any{
-		"Provider":    AuthProviderID,
-		"ID":          fileName,
-		"FileName":    fileName,
-		"Label":       label,
-		"StorageJSON": raw,
-		"Metadata":    metadata,
-		"Attributes":  attributes,
-	}, nil
-}
-
-func codexPlanType(raw []byte, accessToken string) string {
-	var root map[string]any
-	if json.Unmarshal(raw, &root) == nil {
-		if planType := firstString(root, "plan_type", "planType"); planType != "" {
-			return planType
-		}
-	}
-	// 与 CPA 原生解析一致，优先读取 id_token 套餐。
-	idClaims := jwtPayload(stringValue(root["id_token"]))
-	if auth, ok := idClaims["https://api.openai.com/auth"].(map[string]any); ok {
-		if planType := firstString(auth, "chatgpt_plan_type", "plan_type"); planType != "" {
-			return planType
-		}
-	}
-	claims := jwtPayload(accessToken)
-	if auth, ok := claims["https://api.openai.com/auth"].(map[string]any); ok {
-		return firstString(auth, "chatgpt_plan_type", "plan_type")
-	}
-	return ""
-}
-
-func authParse(raw []byte, cfg Config) (map[string]any, error) {
-	var request authParseRequest
-	if err := json.Unmarshal(raw, &request); err != nil {
-		return nil, err
-	}
-	provider := strings.ToLower(strings.TrimSpace(request.Provider))
-	if provider != "" && provider != "codex" && provider != Provider && provider != "openai" {
-		return map[string]any{"Handled": false}, nil
-	}
-	fileName := strings.TrimSpace(request.FileName)
-	if fileName == "" {
-		fileName = filepath.Base(strings.TrimSpace(request.Path))
-	}
-	c, err := parseCredential(request.RawJSON)
-	if err != nil {
-		if provider == Provider {
-			return nil, err
-		}
-		return map[string]any{"Handled": false}, nil
-	}
-	included := cfg.includesSourceAuthID(fileName)
-	if provider == Provider {
-		if !included {
-			return map[string]any{"Handled": false}, nil
-		}
-		virtual := authData(request.RawJSON, fileName, c)
-		return map[string]any{"Handled": true, "Auth": virtual}, nil
-	}
-	native, err := nativeCodexAuthData(request.RawJSON, fileName, c)
-	if err != nil {
-		return nil, err
-	}
-	auths := []any{native}
-	if included {
-		auths = append(auths, authData(request.RawJSON, fileName, c))
-	}
-	return map[string]any{
-		"Handled": true,
-		"Auths":   auths,
-	}, nil
-}
-
-func authRefresh(raw []byte) (map[string]any, error) {
-	var request authRefreshRequest
-	if err := json.Unmarshal(raw, &request); err != nil {
-		return nil, err
-	}
-	c, err := parseCredential(request.StorageJSON)
-	if err != nil {
-		return nil, err
-	}
-	if !c.ExpiresAt.IsZero() && !time.Now().Before(c.ExpiresAt) {
-		return nil, fail(401, "auth_expired", "ChatGPT OAuth access token has expired")
-	}
-	fileName := request.AuthID
-	if fileName == "" {
-		fileName = "chatgpt.json"
-	}
-	if !strings.HasSuffix(fileName, ".json") {
-		fileName += ".json"
-	}
-	next := time.Now().Add(10 * time.Minute)
-	if !c.ExpiresAt.IsZero() {
-		next = c.ExpiresAt.Add(-2 * time.Minute)
-		if next.Before(time.Now().Add(time.Minute)) {
-			next = time.Now().Add(time.Minute)
-		}
-	}
-	return map[string]any{
-		"Auth":             authData(request.StorageJSON, fileName, c),
-		"NextRefreshAfter": next.UTC(),
-	}, nil
 }
 
 func credentialFromExecutor(request ExecutorRequest) (credential, error) {

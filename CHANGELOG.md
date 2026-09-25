@@ -2,6 +2,11 @@
 
 ## 未发布
 
+## v0.1.12-sizhe.3 — 2026-09-26（UTC+8）
+
+- 停止接管 `type: codex` 的 `auth.parse`，由 CPA 官方 Codex 解析器独立管理原始 OAuth 文件。原 OAuth 文件不再变成 virtual auth，可继续在 Management Center 编辑 `excluded_models` 等字段并由 CPA 正常持久化。
+- 每个 `include_auth_ids` 源账号生成一个插件拥有的、无令牌的物理引用认证。引用只保存 `source_auth_id`，每个文件只解析为一个 `oai-basispoints` 认证，不会产生影子记录；插件从该引用读取当前源 OAuth 数据执行请求。
+- Basis Points 模型按引用认证进行 CPA 调度与用量计量，保留一对一的源账号归属；上游 429 只冷却对应引用认证。原生 Codex 路径不受影响；本版本不修改 CPA 源码或镜像。
 - 补充直接安装的动态库命名规则：文件名必须以 `oai-basispoints-v<version>.so` 解析为 `oai-basispoints` 插件 ID。
 
 ## v0.1.12-sizhe.1 — 2026-09-25（UTC+8）

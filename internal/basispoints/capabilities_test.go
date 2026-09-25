@@ -5,33 +5,16 @@ import (
 	"testing"
 )
 
-func TestAuthParsePreservesNativeCodexCredentials(t *testing.T) {
-	root := map[string]any{
-		"type": "codex", "access_token": "test-access", "refresh_token": "test-refresh",
-		"account_id": "test-account", "expired": "2030-01-01T00:00:00Z",
-		"last_refresh": "2026-09-24T00:00:00Z", "priority": float64(7),
-		"custom_field": map[string]any{"enabled": true},
+func TestRegistrationUsesReferenceAuthModelScope(t *testing.T) {
+	capabilities := registration(defaultConfig())["capabilities"].(map[string]any)
+	if capabilities["model_provider"] != true || capabilities["executor"] != true || capabilities["auth_provider"] != true {
+		t.Fatalf("routing capabilities = %#v", capabilities)
 	}
-	root["id_token"] = "e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOiB7ImNoYXRncHRfcGxhbl90eXBlIjogInBybyJ9fQ."
-	root["note"] = "keep note"
-	raw := jsonBytes(root)
-	response, err := authParse(jsonBytes(authParseRequest{Provider: AuthProviderID, FileName: "native.json", RawJSON: raw}), Config{IncludeAuthIDs: []string{"native.json"}})
-	if err != nil {
-		t.Fatal(err)
+	if capabilities["model_router"] == true {
+		t.Fatalf("reference auth plugin must not register a static model router: %#v", capabilities)
 	}
-	native := objectValue(response["Auths"].([]any)[0])
-	metadata := objectValue(native["Metadata"])
-	attributes := native["Attributes"].(map[string]string)
-	if attributes["plan_type"] != "pro" || attributes["priority"] != "7" || attributes["note"] != "keep note" {
-		t.Fatal("native account settings changed")
-	}
-	for key, want := range root {
-		if !reflect.DeepEqual(metadata[key], want) {
-			t.Errorf("native field %q was not preserved", key)
-		}
-	}
-	if !reflect.DeepEqual(native["StorageJSON"], raw) {
-		t.Fatal("source credential storage changed")
+	if capabilities["executor_model_scope"] != "oauth" {
+		t.Fatalf("executor scope = %#v, want oauth", capabilities["executor_model_scope"])
 	}
 }
 
@@ -110,14 +93,6 @@ func TestPrepareRequestPreservesRemoteImagesAndReasoningEffort(t *testing.T) {
 				}
 			}
 		}
-	}
-}
-
-func TestAuthParseRejectsMalformedNativeStorage(t *testing.T) {
-	raw := []byte(`{"type":"codex","access_token":"test","account_id":"test"} trailing`)
-	_, err := authParse(jsonBytes(authParseRequest{Provider: AuthProviderID, FileName: "invalid.json", RawJSON: raw}), defaultConfig())
-	if err == nil {
-		t.Fatal("malformed native credential was accepted")
 	}
 }
 

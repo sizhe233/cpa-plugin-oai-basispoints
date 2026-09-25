@@ -65,6 +65,11 @@ func (s *Service) configure(raw json.RawMessage) error {
 	if err := cfg.normalize(); err != nil {
 		return err
 	}
+	// References contain only a source AuthID. Physical Codex OAuth files stay
+	// under CPA ownership and are never copied or rewritten by this plugin.
+	if err := s.ensureSourceReferences(cfg); err != nil {
+		return err
+	}
 	if cfg.DataDir != "" {
 		if err := os.MkdirAll(cfg.DataDir, 0700); err != nil {
 			return fail(500, "config_storage", "cannot create plugin data directory")
@@ -89,20 +94,20 @@ func (s *Service) Handle(method string, raw json.RawMessage) (any, error) {
 	case "plugin.quiesce":
 		return map[string]any{}, nil
 	case "auth.identifier":
-		// CPA 按这个标识把文件认证交给插件解析；Basis Points 使用
-		// Codex OAuth 文件中的访问令牌。
-		return map[string]any{"identifier": AuthProviderID}, nil
+		return map[string]any{"identifier": Provider}, nil
 	case "executor.identifier":
 		return map[string]any{"identifier": Provider}, nil
 	case "auth.parse":
 		return authParse(raw, s.config())
 	case "auth.login.start":
-		return nil, fail(400, "login_unavailable", "Import an existing CPA codex OAuth credential; interactive login is not used")
+		return nil, fail(400, "login_unavailable", "Basis Points references are created from include_auth_ids; interactive login is not used")
 	case "auth.login.poll":
-		return map[string]any{"Status": "error", "Message": "Import an existing CPA codex OAuth credential"}, nil
+		return map[string]any{"Status": "error", "Message": "Basis Points references are created from include_auth_ids"}, nil
 	case "auth.refresh":
-		return authRefresh(raw)
-	case "model.register", "model.static", "model.for_auth":
+		return authRefresh(raw, s.config())
+	case "model.for_auth":
+		return modelsForReferenceAuth(raw, s.config())
+	case "model.register", "model.static":
 		return modelRegistration(s.config()), nil
 	case "response.intercept_after":
 		return s.interceptModelCatalog(raw)
@@ -134,6 +139,9 @@ func (s *Service) execute(raw json.RawMessage, stream bool) (any, error) {
 	var request ExecutorRequest
 	if err := json.Unmarshal(raw, &request); err != nil {
 		return nil, fail(400, "invalid_request", "executor request is invalid")
+	}
+	if err := s.attachSourceCredential(&request); err != nil {
+		return nil, err
 	}
 	body, credential, err := s.prepareRequest(request)
 	if err != nil {
@@ -266,7 +274,7 @@ func registration(cfg Config) map[string]any {
 				{"Name": "timeout_seconds", "Type": "integer", "Description": "Upstream request timeout."},
 				{"Name": "max_response_bytes", "Type": "integer", "Description": "Maximum upstream response size."},
 				{"Name": "auth_mode", "Type": "string", "Description": "Basis Points authentication mode; normally chatgpt."},
-				{"Name": "include_auth_ids", "Type": "array", "Description": "Exact source CPA Codex AuthIDs allowed to create Basis Points virtual credentials. Empty means none."},
+				{"Name": "include_auth_ids", "Type": "array", "Description": "Exact source CPA Codex AuthIDs. The plugin creates one token-free Basis Points reference per listed source; empty rejects all source credentials."},
 				{"Name": "tools_version_id", "Type": "string", "Description": "Optional authoritative Basis Points tools catalog version."},
 			},
 		},
@@ -274,7 +282,7 @@ func registration(cfg Config) map[string]any {
 			"auth_provider":           true,
 			"model_provider":          true,
 			"executor":                true,
-			"executor_model_scope":    "both",
+			"executor_model_scope":    "oauth",
 			"executor_input_formats":  []string{"openai-response", "codex"},
 			"executor_output_formats": []string{"openai-response", "codex"},
 			"response_interceptor":    true,

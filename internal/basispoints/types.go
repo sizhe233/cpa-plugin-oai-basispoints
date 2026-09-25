@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	Version        = "0.1.12-sizhe.1"
+	Version        = "0.1.12-sizhe.3"
 	Provider       = "oai-basispoints"
 	AuthProviderID = "codex"
 	PluginID       = Provider
@@ -218,8 +218,8 @@ func (c Config) clone() Config {
 	return c
 }
 
-// includesSourceAuthID requires an exact source CPA AuthID match. An empty
-// allowlist deliberately creates no Basis Points virtual credentials.
+// includesSourceAuthID requires an exact physical CPA AuthID match. An empty
+// allowlist deliberately creates no Basis Points reference credentials.
 func (c Config) includesSourceAuthID(authID string) bool {
 	for _, includedAuthID := range c.IncludeAuthIDs {
 		if authID == includedAuthID {

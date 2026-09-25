@@ -168,84 +168,14 @@ func TestParseCredentialPrefersJWTAuthAccountID(t *testing.T) {
 	}
 }
 
-func TestAuthParseExpandsCodexFileIntoNativeAndBasisPointsAuths(t *testing.T) {
-	encode := func(value any) string {
-		raw, _ := json.Marshal(value)
-		return base64.RawURLEncoding.EncodeToString(raw)
-	}
-	token := encode(map[string]any{"alg": "none"}) + "." + encode(map[string]any{
-		"https://api.openai.com/auth": map[string]any{
-			"chatgpt_account_id": "acct-auth-parse",
-			"chatgpt_plan_type":  "plus",
-		},
-	}) + "."
-	raw := jsonBytes(map[string]any{
-		"type":         "codex",
-		"access_token": token,
-		"account_id":   "file-account-id",
-	})
-	request, _ := json.Marshal(authParseRequest{Provider: AuthProviderID, FileName: "codex-account.json", RawJSON: raw})
-	response, err := authParse(request, Config{IncludeAuthIDs: []string{"codex-account.json"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response["Handled"] != true {
-		t.Fatalf("response = %#v, want handled", response)
-	}
-	auths, ok := response["Auths"].([]any)
-	if !ok || len(auths) != 2 {
-		t.Fatalf("Auths = %#v, want native and Basis Points records", response["Auths"])
-	}
-	native := objectValue(auths[0])
-	if native["Provider"] != AuthProviderID || native["ID"] != "codex-account.json" {
-		t.Fatalf("native auth = %#v", native)
-	}
-	attributes, ok := native["Attributes"].(map[string]string)
-	if !ok || attributes["plan_type"] != "plus" {
-		t.Fatalf("native attributes = %#v, want preserved plan type", native["Attributes"])
-	}
-	virtual := objectValue(auths[1])
-	if virtual["Provider"] != Provider || virtual["ID"] != "bp-codex-account" {
-		t.Fatalf("Basis Points auth = %#v", virtual)
-	}
-	metadata := objectValue(virtual["Metadata"])
-	if metadata["account_id"] != "acct-auth-parse" {
-		t.Fatalf("virtual metadata = %#v, want JWT account ID", metadata)
-	}
-}
-
-func TestAuthParseLeavesExcludedSourceAsNativeCodexOnly(t *testing.T) {
-	encode := func(value any) string {
-		raw, _ := json.Marshal(value)
-		return base64.RawURLEncoding.EncodeToString(raw)
-	}
-	token := encode(map[string]any{"alg": "none"}) + "." + encode(map[string]any{
-		"https://api.openai.com/auth": map[string]any{"chatgpt_account_id": "acct-excluded"},
-	}) + "."
-	raw := jsonBytes(map[string]any{"type": "codex", "access_token": token, "account_id": "file-account-id"})
-	request, _ := json.Marshal(authParseRequest{Provider: AuthProviderID, FileName: "codex-free.json", RawJSON: raw})
-	response, err := authParse(request, Config{IncludeAuthIDs: []string{"codex-pro.json"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	auths, ok := response["Auths"].([]any)
-	if !ok || len(auths) != 1 {
-		t.Fatalf("Auths = %#v, want only native Codex record", response["Auths"])
-	}
-	native := objectValue(auths[0])
-	if native["Provider"] != AuthProviderID || native["ID"] != "codex-free.json" {
-		t.Fatalf("native auth = %#v", native)
-	}
-}
-
-func TestServiceUsesCodexAuthParserAndBasisPointsExecutorIdentifiers(t *testing.T) {
+func TestServiceUsesReferenceAuthAndExecutorIdentifiers(t *testing.T) {
 	service := NewService()
 	authIdentifier, err := service.Handle("auth.identifier", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if objectValue(authIdentifier)["identifier"] != AuthProviderID {
-		t.Fatalf("auth identifier = %#v, want %q", authIdentifier, AuthProviderID)
+	if objectValue(authIdentifier)["identifier"] != Provider {
+		t.Fatalf("auth identifier = %#v, want %q", authIdentifier, Provider)
 	}
 	executorIdentifier, err := service.Handle("executor.identifier", nil)
 	if err != nil {
@@ -253,6 +183,72 @@ func TestServiceUsesCodexAuthParserAndBasisPointsExecutorIdentifiers(t *testing.
 	}
 	if objectValue(executorIdentifier)["identifier"] != Provider {
 		t.Fatalf("executor identifier = %#v, want %q", executorIdentifier, Provider)
+	}
+}
+
+func TestAuthParseReturnsOneReferenceAuthAndNeverClaimsCodexSource(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.IncludeAuthIDs = []string{"codex-pro.json"}
+	referenceName := sourceReferenceFileName("codex-pro.json")
+	raw, err := json.Marshal(authParseRequest{
+		Provider: Provider,
+		FileName: referenceName,
+		RawJSON:  referenceAuthJSON("codex-pro.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := authParse(raw, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response["Handled"] != true {
+		t.Fatalf("response = %#v, want handled", response)
+	}
+	if _, exists := response["Auths"]; exists {
+		t.Fatalf("reference parser must return exactly one auth: %#v", response)
+	}
+	auth := objectValue(response["Auth"])
+	if auth["Provider"] != Provider || auth["ID"] != referenceName || auth["Disabled"] != false {
+		t.Fatalf("reference auth = %#v", auth)
+	}
+	attributes := auth["Attributes"].(map[string]string)
+	if attributes[referenceSourceAuthIDKey] != "codex-pro.json" || attributes["auth_kind"] != "oauth" {
+		t.Fatalf("reference attributes = %#v", attributes)
+	}
+
+	codexRaw, _ := json.Marshal(authParseRequest{
+		Provider: AuthProviderID,
+		FileName: "codex-pro.json",
+		RawJSON:  jsonBytes(map[string]any{"type": AuthProviderID}),
+	})
+	codexResponse, err := authParse(codexRaw, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codexResponse["Handled"] != false {
+		t.Fatalf("Codex source was claimed by plugin: %#v", codexResponse)
+	}
+
+	disabledResponse, err := authParse(raw, defaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if objectValue(disabledResponse["Auth"])["Disabled"] != true {
+		t.Fatalf("unconfigured reference should be disabled: %#v", disabledResponse)
+	}
+
+	customNameRaw, _ := json.Marshal(authParseRequest{
+		Provider: Provider,
+		FileName: "manual-basispoints.json",
+		RawJSON:  referenceAuthJSON("codex-pro.json"),
+	})
+	customNameResponse, err := authParse(customNameRaw, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if objectValue(customNameResponse["Auth"])["Disabled"] != true {
+		t.Fatalf("non-managed reference should be disabled: %#v", customNameResponse)
 	}
 }
 
