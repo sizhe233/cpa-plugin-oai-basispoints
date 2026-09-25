@@ -1,5 +1,9 @@
 # 更新日志
 
+## 未发布
+
+- 补充直接安装的动态库命名规则：文件名必须以 `oai-basispoints-v<version>.so` 解析为 `oai-basispoints` 插件 ID。
+
 ## v0.1.12-sizhe.1 — 2026-09-25（UTC+8）
 
 - Fork 版本新增 `include_auth_ids` 源 CPA AuthID 白名单。只为精确匹配的 OAuth 文件生成 `oai-basispoints` 虚拟认证；未命中的文件继续保留原生 `codex` 认证，不改变现有原生模型调度。

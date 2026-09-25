@@ -25,7 +25,7 @@ plugins:
 
 ## 安装和配置
 
-1. 将 `build/linux/amd64/oai-basispoints.so` 复制到 CPA 的 Linux amd64 插件目录。
+1. 将 Linux amd64 动态库复制到 CPA 的插件目录，并使用 `oai-basispoints-v<version>.so` 作为文件名，例如 `oai-basispoints-v0.1.12-sizhe.1.so`。CPA 由文件名解析插件 ID；不要在 `-v` 前加入 Fork 名称，否则它不会匹配 `plugins.configs.oai-basispoints`。
 2. 将 `config.example.yaml` 按需合并到 CPA 的 `config.yaml`；它是完整的宿主配置示例，不会由插件自动读取。插件内置默认暴露 `gpt-6-astra-basispoints`，示例同时配置 Astra 和 Sol，可继续增删模型。
 3. 在 `plugins.configs.oai-basispoints.include_auth_ids` 中列出允许的源 CPA AuthID。AuthID 就是 CPA 中显示的 OAuth 文件名，例如 `codex-paid-pro.json`；不要填写 `bp-` 前缀的虚拟 ID。未配置或为空时，本 Fork 不创建任何 Basis Points 虚拟凭证，原生 Codex 记录和调度不受影响。
 4. CPA 的 `auth-dir` 中已有的 `type: codex` OAuth 文件会被插件识别；插件只在内存中读取 token，不生成另一份 token 文件。
