@@ -281,9 +281,9 @@ func registration(cfg Config) map[string]any {
 		"metadata": map[string]any{
 			"Name":             "OpenAI Basis Points",
 			"Version":          Version,
-			"Author":           "jaxson-wang",
-			"GitHubRepository": "https://github.com/JaxsonWang/cpa-plugin-oai-basispoints",
-			"Description":      "通过 CPA 的 Codex OAuth 凭据接入 Basis Points，安全转发客户端工具调用。",
+			"Author":           "sizhe233 (fork of jaxson-wang)",
+			"GitHubRepository": "https://github.com/sizhe233/cpa-plugin-oai-basispoints",
+			"Description":      "通过已选定的 CPA Codex OAuth 凭据接入 Basis Points，安全转发客户端工具调用。",
 			"ConfigFields": []map[string]any{
 				{"Name": "upstream_transport", "Type": "string", "Description": "auto：仅凭据 websockets 已开启时优先 WS，握手失败可回退 HTTP/SSE；http：仅使用 HTTP/SSE。"},
 				{"Name": "stream_tool_mode", "Type": "string", "Description": "incremental（默认）：实时交付正文和摘要；buffered：本轮有可调用工具时等待整轮校验，可在交付前重生成一次，但首字延迟增大。"},
@@ -297,6 +297,7 @@ func registration(cfg Config) map[string]any {
 				{"Name": "auth_mode", "Type": "string", "Description": "Basis Points 认证模式，通常保持 chatgpt。"},
 				{"Name": "tools_version_id", "Type": "string", "Description": "可选的 Basis Points 工具目录版本 ID，通常留空。"},
 				{"Name": "credential_source", "Type": "string", "Description": "host（默认）：Codex 文件交由 CPA 原生刷新和持久化，执行时读取宿主最新凭据；virtual：显式启用插件虚拟认证。"},
+				{"Name": "include_auth_ids", "Type": "array", "Description": "仅 host 模式：精确允许的 CPA Codex Auth ID 或文件名。空白名单拒绝所有 Basis Points 凭据，绝不回退到全量账号。"},
 			},
 		},
 		"capabilities": map[string]any{

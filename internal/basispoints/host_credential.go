@@ -16,6 +16,7 @@ import (
 // 旧 refresh_token；Basis Points 记录也不会跟随原生刷新，access_token 到期后请求失败。
 
 type hostAuthEntry struct {
+	ID       string `json:"id"`
 	Index    string `json:"auth_index"`
 	Name     string `json:"name"`
 	Provider string `json:"provider"`
@@ -70,15 +71,16 @@ func (s *Service) withHostCredential(request ExecutorRequest) (ExecutorRequest, 
 	if err := s.call("host.auth.list", map[string]any{"host_callback_id": request.HostCallbackID}, &listed); err != nil {
 		return request, fail(503, "auth_unavailable", "CPA credential list is unavailable: "+safeError(err))
 	}
+	cfg := s.config()
 	candidates := make([]hostAuthEntry, 0, len(listed.Files))
 	for _, entry := range listed.Files {
 		if entry.Provider == AuthProviderID && !entry.Runtime && !entry.Disabled &&
-			entry.Index != "" && entry.Path != "" {
+			entry.Index != "" && entry.Path != "" && cfg.includesHostAuth(entry) {
 			candidates = append(candidates, entry)
 		}
 	}
 	if len(candidates) == 0 {
-		return request, fail(503, "auth_unavailable", "no available Codex OAuth credential in CPA")
+		return request, fail(503, "auth_unavailable", "no configured Basis Points source credential is available in CPA")
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		left, right := strings.ToLower(candidates[i].Name), strings.ToLower(candidates[j].Name)
@@ -145,4 +147,16 @@ func (s *Service) withHostCredential(request ExecutorRequest) (ExecutorRequest, 
 	}
 	// 按稳定顺序报告真实失败原因，不让轮询游标改变同一故障的 HTTP 分类。
 	return request, errorsByIndex[0]
+}
+
+// includesHostAuth applies the configured exact source allowlist to physical
+// CPA entries. AuthID and file name are both stable CPA-facing identifiers, so
+// accepting either preserves existing include_auth_ids configurations.
+func (c Config) includesHostAuth(entry hostAuthEntry) bool {
+	for _, authID := range c.IncludeAuthIDs {
+		if entry.ID == authID || entry.Name == authID {
+			return true
+		}
+	}
+	return false
 }

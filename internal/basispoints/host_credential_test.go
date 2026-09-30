@@ -43,10 +43,17 @@ func (f *hostCredentialFixture) host(method string, payload any, out any) error 
 	return json.Unmarshal(jsonBytes(result), out)
 }
 
-func hostModeService(t *testing.T) *Service {
+func hostModeService(t *testing.T, includeAuthIDs ...string) *Service {
 	t.Helper()
 	svc := NewService()
-	if _, err := svc.Handle("plugin.register", jsonBytes(map[string]any{"config_yaml": []byte("data_dir: \"\"\nupstream_transport: http\n")})); err != nil {
+	configYAML := "data_dir: \"\"\nupstream_transport: http\n"
+	if includeAuthIDs != nil {
+		configYAML += "include_auth_ids:\n"
+		for _, authID := range includeAuthIDs {
+			configYAML += fmt.Sprintf("  - %q\n", authID)
+		}
+	}
+	if _, err := svc.Handle("plugin.register", jsonBytes(map[string]any{"config_yaml": []byte(configYAML)})); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Handle("model.static", jsonBytes(map[string]any{"Host": map[string]any{"ProxyURL": ""}})); err != nil {
@@ -114,7 +121,7 @@ func TestHostCredentialModeReadsCurrentHostCredential(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := hostModeService(t)
+	svc := hostModeService(t, "native.json")
 	svc.cfg.ResponsesURL = server.URL
 	fixture := &hostCredentialFixture{
 		entries: []hostAuthEntry{
@@ -153,7 +160,7 @@ func TestHostCredentialModeReadsCurrentHostCredential(t *testing.T) {
 }
 
 func TestHostCredentialModeSkipsExpiredAndReportsMissing(t *testing.T) {
-	svc := hostModeService(t)
+	svc := hostModeService(t, "expired.json", "valid.json")
 	fixture := &hostCredentialFixture{
 		entries: []hostAuthEntry{
 			{Index: "expired", Name: "expired.json", Provider: AuthProviderID, Path: "/auths/expired.json"},
@@ -182,6 +189,79 @@ func TestHostCredentialModeSkipsExpiredAndReportsMissing(t *testing.T) {
 	}
 }
 
+func TestHostCredentialModeUsesOnlyIncludedSources(t *testing.T) {
+	svc := hostModeService(t, "physical-auth-id", "allowed-name.json")
+	fixture := &hostCredentialFixture{
+		entries: []hostAuthEntry{
+			{ID: "physical-auth-id", Index: "id-match", Name: "unrelated-name.json", Provider: AuthProviderID, Path: "/fixture/id-match.json"},
+			{ID: "other-auth-id", Index: "name-match", Name: "allowed-name.json", Provider: AuthProviderID, Path: "/fixture/name-match.json"},
+			{ID: "blocked-auth-id", Index: "blocked", Name: "blocked.json", Provider: AuthProviderID, Path: "/fixture/blocked.json"},
+		},
+		files: map[string]string{
+			"id-match":   codexFile("id-token", time.Now().Add(time.Hour)),
+			"name-match": codexFile("name-token", time.Now().Add(time.Hour)),
+			"blocked":    codexFile("blocked-token", time.Now().Add(time.Hour)),
+		},
+	}
+	svc.SetHost(fixture.host)
+	selected := map[string]int{}
+	for range 4 {
+		request, err := svc.withHostCredential(ExecutorRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		selected[request.AuthID]++
+	}
+	if selected["id-match"] != 2 || selected["name-match"] != 2 || selected["blocked"] != 0 {
+		t.Fatalf("allowlist selection = %v", selected)
+	}
+	for _, index := range fixture.gets {
+		if index == "blocked" {
+			t.Fatalf("read source outside include_auth_ids: %v", fixture.gets)
+		}
+	}
+}
+
+func TestHostCredentialModeDoesNotFallBackOutsideAllowlist(t *testing.T) {
+	svc := hostModeService(t, "allowed.json")
+	fixture := &hostCredentialFixture{
+		entries: []hostAuthEntry{
+			{Index: "allowed", Name: "allowed.json", Provider: AuthProviderID, Path: "/fixture/allowed.json"},
+			{Index: "fallback", Name: "fallback.json", Provider: AuthProviderID, Path: "/fixture/fallback.json"},
+		},
+		files: map[string]string{
+			"allowed":  codexFile("expired", time.Now().Add(-time.Minute)),
+			"fallback": codexFile("valid", time.Now().Add(time.Hour)),
+		},
+	}
+	svc.SetHost(fixture.host)
+	_, err := svc.withHostCredential(ExecutorRequest{})
+	var apiError *APIError
+	if !errors.As(err, &apiError) || apiError.Status != 401 || apiError.Kind != "auth_expired" {
+		t.Fatalf("allowlisted expiration error = %v", err)
+	}
+	if len(fixture.gets) != 1 || fixture.gets[0] != "allowed" {
+		t.Fatalf("unexpected fallback reads: %v", fixture.gets)
+	}
+}
+
+func TestHostCredentialModeRejectsEmptyAllowlist(t *testing.T) {
+	svc := hostModeService(t)
+	fixture := &hostCredentialFixture{
+		entries: []hostAuthEntry{{Index: "fallback", Name: "fallback.json", Provider: AuthProviderID, Path: "/fixture/fallback.json"}},
+		files:   map[string]string{"fallback": codexFile("valid", time.Now().Add(time.Hour))},
+	}
+	svc.SetHost(fixture.host)
+	_, err := svc.withHostCredential(ExecutorRequest{})
+	var apiError *APIError
+	if !errors.As(err, &apiError) || apiError.Status != 503 || apiError.Kind != "auth_unavailable" {
+		t.Fatalf("empty allowlist error = %v", err)
+	}
+	if len(fixture.gets) != 0 {
+		t.Fatalf("empty allowlist read a fallback credential: %v", fixture.gets)
+	}
+}
+
 func TestCredentialSourceValidation(t *testing.T) {
 	if cfg := NewService().config(); cfg.CredentialSource != CredentialSourceHost {
 		t.Fatalf("new service credential source = %q, want host", cfg.CredentialSource)
@@ -195,6 +275,38 @@ func TestCredentialSourceValidation(t *testing.T) {
 		if want != "" && cfg.CredentialSource != want {
 			t.Fatalf("credential_source %q normalized = %q, want %q", value, cfg.CredentialSource, want)
 		}
+	}
+}
+
+func TestIncludeAuthIDsValidationAndCloning(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.IncludeAuthIDs = []string{" physical-id ", "physical-id", "source.json"}
+	if err := cfg.normalize(); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(cfg.IncludeAuthIDs); got != "[physical-id source.json]" {
+		t.Fatalf("normalized include_auth_ids = %s", got)
+	}
+	clone := cfg.clone()
+	cfg.IncludeAuthIDs[0] = "changed"
+	if got := fmt.Sprint(clone.IncludeAuthIDs); got != "[physical-id source.json]" {
+		t.Fatalf("cloned include_auth_ids = %s", got)
+	}
+
+	invalid := defaultConfig()
+	invalid.IncludeAuthIDs = []string{""}
+	if err := invalid.normalize(); err == nil {
+		t.Fatal("empty include_auth_ids entry was accepted")
+	}
+	virtual := defaultConfig()
+	virtual.CredentialSource = CredentialSourceVirtual
+	virtual.IncludeAuthIDs = []string{"source.json"}
+	if err := virtual.normalize(); err == nil {
+		t.Fatal("virtual mode accepted include_auth_ids")
+	}
+	virtual.IncludeAuthIDs = []string{}
+	if err := virtual.normalize(); err == nil {
+		t.Fatal("virtual mode accepted an explicit empty include_auth_ids")
 	}
 }
 
@@ -248,7 +360,7 @@ func TestCredentialSourceConfiguration(t *testing.T) {
 }
 
 func TestHostCredentialRotationSkipsInvalidWithoutBias(t *testing.T) {
-	svc := hostModeService(t)
+	svc := hostModeService(t, "0-expired.json", "a.json", "b.json")
 	fixture := &hostCredentialFixture{
 		entries: []hostAuthEntry{
 			{Index: "expired", Name: "0-expired.json", Provider: AuthProviderID, Path: "/fixture/0-expired.json"},
@@ -284,7 +396,7 @@ func TestHostCredentialRotationSkipsInvalidWithoutBias(t *testing.T) {
 }
 
 func TestHostCredentialExhaustionKeepsDeterministicCause(t *testing.T) {
-	svc := hostModeService(t)
+	svc := hostModeService(t, "a.json", "b.json")
 	fixture := &hostCredentialFixture{
 		entries: []hostAuthEntry{
 			{Index: "expired", Name: "a.json", Provider: AuthProviderID, Path: "/fixture/a.json"},
@@ -304,9 +416,9 @@ func TestHostCredentialExhaustionKeepsDeterministicCause(t *testing.T) {
 }
 
 func TestHostCredentialUsesCurrentFileSettings(t *testing.T) {
-	svc := hostModeService(t)
+	svc := hostModeService(t, "a.json")
 	fixture := &hostCredentialFixture{
-		entries: []hostAuthEntry{{Index: "a", Provider: AuthProviderID, Path: "/fixture/a.json"}},
+		entries: []hostAuthEntry{{Index: "a", Name: "a.json", Provider: AuthProviderID, Path: "/fixture/a.json"}},
 		files:   map[string]string{},
 	}
 	svc.SetHost(fixture.host)

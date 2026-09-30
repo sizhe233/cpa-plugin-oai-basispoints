@@ -6,12 +6,12 @@
 
 - 插件不再接管 `type: codex` 文件解析，CPA 按原生 Codex 认证加载、刷新，并把轮换后的 `refresh_token` 写回源文件；重启后读取的是最新凭据。
 - 插件改为声明模型路由器，只把配置中的别名模型交给本执行器；原生 Codex 模型的调度、冷却与重试不受影响。
-- 每次执行通过 `host.auth.list` / `host.auth.get` 读取宿主当前凭据，轮询未禁用、非运行时且 token 未过期的 Codex 认证。不缓存 token；过期文件不挤占有效账号的轮询份额。没有候选时返回 503 `auth_unavailable`；全部读取或校验失败时，按文件名稳定顺序返回实际失败原因，例如 401 `auth_expired`，不会随轮询位置随机改变错误分类。
+- 每次执行通过 `host.auth.list` / `host.auth.get` 读取宿主当前凭据，但只在 `include_auth_ids` 明确列出的物理 CPA Auth ID 或文件名中轮询未禁用、非运行时且 token 未过期的 Codex 认证。白名单省略或为空时拒绝所有来源，不缓存 token，也绝不回退选择未列入的账号；过期文件不挤占白名单内有效账号的轮询份额。没有候选时返回 503 `auth_unavailable`；全部读取或校验失败时，按稳定顺序返回实际失败原因，例如 401 `auth_expired`，不会随轮询位置随机改变错误分类。
 - 不共用原生 Codex 通道的过载冷却，也不在一次已发送的生成失败后自动换号重放；401/403/407/429 保留真实状态。此模式不经过 CPA 原生认证调度器，原生账号级冷却、优先级及用量归属不能视为已自动继承。
 - `model.static` 提供宿主全局代理；凭据自身 `proxy_url` 优先，其次为宿主 `proxy-url`，都未配置才使用环境代理。`direct` / `none` 明确禁用代理。HTTP、SSE、图片上传和 WS 使用同一份有效代理策略；错误或不可达的代理不允许绕过直连。
 - 未修改的 CPA `host.http.*` ABI 不能给 self 路由重新绑定账号代理，因此 host 模式的 HTTP/SSE/附件由插件绑定本次凭据的 HTTP 客户端发送，并保留取消、超时、停用及大小限制；不是失败后的备用通道。连接池按账号与有效代理隔离，不缓存 OAuth token。该路径不经过宿主 `host.http.*` 请求日志捕获。
 
-仍可显式设置 `credential_source: virtual`：`auth.parse` 接管 Codex 文件并展开原生 Codex 与 Basis Points 两条内存认证。当前 CPA 会把两条记录都标记为 `plugin_virtual`，不持久化原生刷新结果，Basis Points 记录也不自动同步刷新的 JWT；因此不建议用于长期运行。已有 YAML 或 `data_dir/settings.json` 中显式保存的 `virtual` 不会被新默认值覆盖，需改为 `host` 或删除该字段；已有失效凭据仍需通过 CPA 更新或重新导入，新默认值不会修复已轮换失效的 token。
+仍可显式设置 `credential_source: virtual`：`auth.parse` 接管 Codex 文件并展开原生 Codex 与 Basis Points 两条内存认证。当前 CPA 会把两条记录都标记为 `plugin_virtual`，不持久化原生刷新结果，Basis Points 记录也不自动同步刷新的 JWT；因此不建议用于长期运行。`include_auth_ids` 只能与 `host` 一起使用，避免误把精确筛选降级为虚拟认证的全量选择。已有 YAML 或 `data_dir/settings.json` 中显式保存的 `virtual` 不会被新默认值覆盖，需改为 `host` 或删除该字段；已有失效凭据仍需通过 CPA 更新或重新导入，新默认值不会修复已轮换失效的 token。
 
 插件不再提供独立设置页面或源认证编辑接口。请直接在 **CPA 凭证设置**中管理 `websockets` 等字段；`upstream_transport: auto` 读取当前凭据的开关，`http` 则始终禁用 WS。host 模式下一次请求读取已保存的新开关，无需维护第二份设置。
 

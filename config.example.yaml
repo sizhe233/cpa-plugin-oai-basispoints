@@ -76,6 +76,12 @@ plugins:
       #   不使用原生 Codex 通道的冷却，也不在生成失败后自动换号重放。
       credential_source: host
 
+      # 仅允许这些精确物理 CPA Codex Auth ID 或文件名用于 Basis Points。
+      # 空白或省略时拒绝所有来源，绝不退回到全量 Codex 账号。
+      # 不要填写邮箱、token 或 oai-basispoints-ref-*.json 引用文件名。
+      include_auth_ids:
+        - codex-paid-pro.json
+
       # 非敏感配置的持久化目录，默认值为 plugins/oai-basispoints-data。
       # 当前实现会先读取 YAML，再用此目录中已有的 settings.json 覆盖对应字段。
       # 本示例留空：只由 YAML 管理配置，避免旧文件覆盖模型列表和映射。

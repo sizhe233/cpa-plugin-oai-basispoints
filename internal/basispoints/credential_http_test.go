@@ -67,7 +67,7 @@ func credentialTestProxy(t *testing.T) (*httptest.Server, *atomic.Int32) {
 
 func credentialTransportService(t *testing.T, endpoint, globalProxy, accountProxy string, ws bool) (*Service, *websocketCapture) {
 	t.Helper()
-	svc := hostModeService(t)
+	svc := hostModeService(t, "native.json")
 	svc.cfg.ResponsesURL = endpoint
 	svc.cfg.UpstreamTransport = "auto"
 	_, err := svc.Handle("model.static", jsonBytes(map[string]any{"Host": map[string]any{"ProxyURL": globalProxy}}))

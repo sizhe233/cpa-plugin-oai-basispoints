@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	Version        = "0.2.9"
+	Version        = "0.2.9-sizhe.1"
 	Provider       = "oai-basispoints"
 	AuthProviderID = "codex"
 	PluginID       = Provider
@@ -137,6 +137,7 @@ type Config struct {
 	AuthMode                  string            `yaml:"auth_mode" json:"auth_mode"`
 	ToolsVersionID            string            `yaml:"tools_version_id" json:"tools_version_id"`
 	CredentialSource          string            `yaml:"credential_source" json:"credential_source"`
+	IncludeAuthIDs            []string          `yaml:"include_auth_ids,omitempty" json:"include_auth_ids,omitempty"`
 }
 
 func defaultConfig() Config {
@@ -189,6 +190,30 @@ func (c *Config) normalize() error {
 	if c.CredentialSource != CredentialSourceVirtual && c.CredentialSource != CredentialSourceHost {
 		return fail(400, "invalid_config", "credential_source must be virtual or host")
 	}
+	includeAuthIDsConfigured := c.IncludeAuthIDs != nil
+	if includeAuthIDsConfigured {
+		seenAuthIDs := make(map[string]struct{}, len(c.IncludeAuthIDs))
+		includeAuthIDs := make([]string, 0, len(c.IncludeAuthIDs))
+		for _, authID := range c.IncludeAuthIDs {
+			authID = strings.TrimSpace(authID)
+			if authID == "" {
+				return fail(400, "invalid_config", "include_auth_ids cannot contain an empty source AuthID")
+			}
+			if _, exists := seenAuthIDs[authID]; exists {
+				continue
+			}
+			seenAuthIDs[authID] = struct{}{}
+			includeAuthIDs = append(includeAuthIDs, authID)
+		}
+		if len(includeAuthIDs) == 0 {
+			c.IncludeAuthIDs = nil
+		} else {
+			c.IncludeAuthIDs = includeAuthIDs
+		}
+	}
+	if c.CredentialSource == CredentialSourceVirtual && includeAuthIDsConfigured {
+		return fail(400, "invalid_config", "include_auth_ids requires credential_source: host")
+	}
 	c.AuthMode = strings.TrimSpace(c.AuthMode)
 	if c.AuthMode == "" {
 		c.AuthMode = "chatgpt"
@@ -237,6 +262,7 @@ func (c *Config) normalize() error {
 func (c Config) clone() Config {
 	c.Models = append([]string(nil), c.Models...)
 	c.ModelMappings = maps.Clone(c.ModelMappings)
+	c.IncludeAuthIDs = append([]string(nil), c.IncludeAuthIDs...)
 	return c
 }
 

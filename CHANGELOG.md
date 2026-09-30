@@ -1,5 +1,12 @@
 # 更新日志
 
+## v0.2.9-sizhe.1 — 2026-09-30（UTC+8）
+
+- 基于上游 `v0.2.9` 的 host 凭据模式，保留 CPA 原生 Codex OAuth 文件的加载、刷新和持久化，避免虚拟认证阻断 `refresh_token` 写回。源认证继续可在 CPA 管理页编辑，包括 `excluded_models`。
+- 恢复并强化 Fork 的 `include_auth_ids`：只接受精确物理 CPA Auth ID 或文件名；未列入账号在候选阶段被排除，既不会读取其凭据，也不会在已列入账号失效时回退选用。白名单为空或未配置时返回 `auth_unavailable`。
+- `include_auth_ids` 仅支持 `credential_source: host`；与 `virtual` 同时配置会被拒绝，防止静默扩大可用账号范围。旧 `oai-basispoints-ref-*.json` 无令牌引用文件不再是 host 模式的运行输入，升级时应在备份后移除。
+- Fork 元数据、插件商店 registry 和安装说明指向 `sizhe233/cpa-plugin-oai-basispoints`；发布版本由 GitHub Actions 从 `v0.2.9-sizhe.1` 标签构建。
+
 ## v0.2.9 — 2026-09-30（UTC+8）
 
 - `credential_source` 默认改为 `host`：不再接管 Codex OAuth 文件解析，由 CPA 原生负责刷新和持久化；插件执行时读取宿主当前凭据，不缓存 token。修复虚拟认证阻断原生刷新持久化的问题。显式 `virtual` 及持久化配置仍保留，已失效的凭据不会因升级自动恢复。
